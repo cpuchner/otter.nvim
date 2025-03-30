@@ -232,7 +232,9 @@ M[ms.textDocument_completion] = function(err, response, ctx)
   ctx.bufnr = ctx.params.otter.main_nr
   -- response.data.uri = ctx.params.otter.main_uri
   -- response.textDocument.uri = ctx.params.otter.main_uri
-  for _, item in ipairs(response.items) do
+
+	-- NOTE: needed for some reason for new postgres_lsp
+  for _, item in ipairs(response) do
     if item.data ~= nil then
       item.data.uri = ctx.params.otter.main_uri
     end
