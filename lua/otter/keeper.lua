@@ -164,6 +164,7 @@ keeper.extract_code_chunks = function(main_nr, lang, exclude_eval_false, range_s
           end
           local leading_offset
           text, leading_offset = trim_leading_witespace(text, main_nr, start_row)
+          text = text .. ";"
           local result = {
             range = { from = { start_row, start_col }, to = { end_row, end_col } },
             lang = lang_capture,
@@ -188,6 +189,7 @@ keeper.extract_code_chunks = function(main_nr, lang, exclude_eval_false, range_s
             local start_row, start_col, end_row, end_col = node:range()
             local leading_offset
             text, leading_offset = trim_leading_witespace(text, main_nr, start_row)
+            text = text .. ";"
             local result = {
               range = { from = { start_row, start_col }, to = { end_row, end_col } },
               lang = name,
