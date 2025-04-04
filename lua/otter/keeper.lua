@@ -49,6 +49,47 @@ local function filter_lang(s)
   return s:gsub("^[%s%p]+", "")
 end
 
+-- Map of Golang types to their PostgreSQL string default values
+local golangToPostgresDefaults = {
+  -- Numeric types
+  ["int"] = "'0'",
+  ["int8"] = "'0'",
+  ["int16"] = "'0'",
+  ["int32"] = "'0'",
+  ["int64"] = "'0'",
+  ["uint"] = "'0'",
+  ["uint8"] = "'0'",
+  ["uint16"] = "'0'",
+  ["uint32"] = "'0'",
+  ["uint64"] = "'0'",
+  ["uintptr"] = "'0'",
+  ["float32"] = "'0.0'",
+  ["float64"] = "'0.0'",
+  ["complex64"] = "'0'",
+  ["complex128"] = "'0'",
+  -- Text type
+  ["string"] = "''",
+  ["rune"] = "'0'",
+  ["byte"] = "'0'",
+  -- Boolean type
+  ["bool"] = "'false'",
+  -- Composite types
+  ["array"] = "'{}'",
+  ["slice"] = "'{}'",
+  ["map"] = "'{}'",
+  ["channel"] = "NULL",
+  ["pointer"] = "NULL",
+  ["struct"] = "'{}'",
+  ["interface"] = "NULL",
+  -- Function
+  ["func"] = "NULL",
+  -- Time-related
+  ["time.Time"] = "'0001-01-01 00:00:00'",
+  ["time.Duration"] = "'0'",
+  -- Error
+  ["error"] = "NULL"
+}
+
 ---determine the language of the current node
 ---@param main_nr integer bufnr of the main buffer
 ---@param name string name of the capture
@@ -190,6 +231,14 @@ keeper.extract_code_chunks = function(main_nr, lang, exclude_eval_false, range_s
             local start_row, start_col, end_row, end_col = node:range()
             local leading_offset
             text, leading_offset = trim_leading_witespace(text, main_nr, start_row)
+
+						text = text:gsub(":%s*id", function() 
+								return "'" .. string.gsub("xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx", "[xy]", function(c)
+										local v = (c == "x") and math.random(0, 0xf) or math.random(8, 0xb)
+										return string.format("%x", v)
+								end) .. "'"
+						end)
+
             text = text:gsub(";", "")
             text = text .. ";"
             local result = {
@@ -612,3 +661,4 @@ keeper.get_language_lines_in_visual_selection = function(exclude_eval_false)
 end
 
 return keeper
+
