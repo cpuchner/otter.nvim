@@ -5,18 +5,13 @@
 --- and code chunks
 local keeper = {}
 
-local count = 0;
+-- local count = 0;
 
 local extensions = require("otter.tools.extensions")
 local fn = require("otter.tools.functions")
 local api = vim.api
 local ts = vim.treesitter
 local cfg = require("otter.config").cfg
-
-
-
-
-
 
 local function get_type_definition_sync(node, bufnr)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
@@ -52,7 +47,36 @@ local function get_type_definition_sync(node, bufnr)
 	return nil, "No type definition found"
 end
 
-local function get_hover_info_sync(node, bufnr)
+local function get_hover_info_sync(uri, start, bufnr)
+	bufnr = bufnr or vim.api.nvim_get_current_buf()
+
+	local params = {
+		textDocument = {
+			uri = uri,
+		},
+		position = {
+			line = start.line,
+			character = start.character,
+		}
+	}
+
+	local timeout_ms = 1000
+	local results = vim.lsp.buf_request_sync(bufnr, 'textDocument/hover', params, timeout_ms)
+
+	if not results or vim.tbl_isempty(results) then
+		return nil, "No results from LSP"
+	end
+
+	for _, result in pairs(results) do
+		if result.result and result.result.contents then
+			return result.result.contents, nil
+		end
+	end
+
+	return nil, "No hover information found"
+end
+
+local function get_hover_info_from_node_sync(node, bufnr)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 
 	local start_row, start_col, _, _ = node:range()
@@ -240,17 +264,16 @@ end
 ---@param range_end_row integer? Row to end at, inclusive, 1-indexed.
 ---@return table<string, CodeChunk[]>
 keeper.extract_code_chunks = function(main_nr, lang, exclude_eval_false, range_start_row, range_end_row)
-	local instance = count
-	count = count + 1
-
-	vim.notify(
-		string.format("Finding code chunks - Buffer: %d", instance),
-		vim.log.levels.INFO,
-		{
-			title = "Counter starting to extract code",
-			timeout = 2000
-		}
-	)
+	-- local instance = count
+	-- count = count + 1
+	-- vim.notify(
+	-- 	string.format("Finding code chunks - Buffer: %d", instance),
+	-- 	vim.log.levels.INFO,
+	-- 	{
+	-- 		title = "Counter starting to extract code",
+	-- 		timeout = 2000
+	-- 	}
+	-- )
 
 	local query = keeper.rafts[main_nr].query
 	local parser = keeper.rafts[main_nr].parser
@@ -328,12 +351,18 @@ keeper.extract_code_chunks = function(main_nr, lang, exclude_eval_false, range_s
 						local localNode = node:parent()
 						while localNode ~= nil do
 							if localNode:type() == "argument_list" then
-								text = text .. "--args~~"
 								local seen_rsl = false
 								for child in localNode:iter_children() do
-									if child:named() and seen_rsl then
-										text = text .. child:symbol() .. "----"
-										table.insert(identifier_nodes, child)
+									if seen_rsl then
+										if child:type() == "identifier" then
+											table.insert(identifier_nodes, child)
+										elseif child:type() == "selector_expression" then
+											for c in child:iter_children() do
+												if c:type() == "field_identifier" then
+													table.insert(identifier_nodes, c)
+												end
+											end
+										end
 									end
 
 									if child:type() == "raw_string_literal" then
@@ -345,67 +374,128 @@ keeper.extract_code_chunks = function(main_nr, lang, exclude_eval_false, range_s
 							localNode = localNode:parent()
 						end
 
-						-- Case for numerated args
-						for match in text:gmatch("%$%d") do
-							local paramNum = tonumber(match:sub(2))
-							local b = identifier_nodes[paramNum]
 
-							if b == nil then
-								goto continue
-							end
+						-- local type_info, err = get_type_definition_sync(b)
+						-- if err then
+						-- 	print("Error: " .. err)
+						-- else
+						-- 	print("Type definition: " .. vim.inspect(type_info))
+						-- end
 
-							-- local type_info, err = get_type_definition_sync(b)
-							-- if err then
-							-- 	print("Error: " .. err)
-							-- else
-							-- 	print("Type definition: " .. vim.inspect(type_info))
-							-- end
 
-							local hover_info, err = get_hover_info_sync(b)
-							if err then
-								print("Error: " .. err)
-							else
-								if type(hover_info) == "table" then
-									if hover_info.kind == "markdown" then
-										local m = hover_info.value:match("^.-\n(.-)\n")
-										local _, _, type = m:match("(%s+)([^%s]+)%s+([^%s]+)")
+						-- TODO: final case is the select into a struct case
+						-- We need a way to pull the type of the field to do this
+						-- Do once I've learned more about the lsp.
 
-										text = text:gsub("%$%d", function()
-											local arr = false
-											if type:sub(1, 2) == "[]" then
-												type = type:sub(3)
-												arr = true
-											end
+						-- Case for named args
+						local start_pos, _ = text:find("[^a-z]:[a-z]+")
+						if start_pos then
+							-- Likely only have 1 arg here
+							local b = identifier_nodes[1]
 
-											local default_value = golangToPostgresDefaults[type]
-											if default_value then
-												if arr then
-													return "ARRAY[" .. default_value .. "]"
-												else
-													return default_value
-												end
-											else
-												return "MISSING TYPE:" .. type .. "-" .. name
-											end
-										end)
+							if b ~= nil then
+								local type_info, err = get_type_definition_sync(b)
+								if err or type_info == nil or type_info[1] == nil then
+									if err then
+										print("Error: " .. err)
 									else
-										print("Type info isn't md: " .. vim.inspect(hover_info))
+										print("Missing type info")
 									end
 								else
-									print("Type info isn't md: " .. tostring(hover_info))
+									local hover_info, error = get_hover_info_sync(type_info[1].uri, type_info[1].range.start)
+
+									if error then
+										print("Error: " .. error)
+									else
+										if type(hover_info) == "table" then
+											if hover_info.kind == "markdown" then
+												local type_map = {}
+												for go_type, key in hover_info.value:gmatch('([%w_%.]+)%s+`db:"(.-)"`') do
+													type_map[key] = go_type
+												end
+
+
+												text = text:gsub(":(%w+)", function(key)
+													local type = type_map[key]
+
+													if type == nil then
+														return key
+													else
+														local arr = false
+														if type:sub(1, 2) == "[]" then
+															type = type:sub(3)
+															arr = true
+														end
+
+														local default_value = golangToPostgresDefaults[type]
+														if default_value then
+															if arr then
+																return "ARRAY[" .. default_value .. "]"
+															else
+																return default_value
+															end
+														else
+															return "MISSING TYPE:" .. type .. "-" .. name
+														end
+													end
+												end)
+											else
+												print("Type info isn't md: " .. vim.inspect(hover_info))
+											end
+										else
+											print("Type info isn't md: " .. tostring(hover_info))
+										end
+									end
 								end
 							end
-
-							text = text:gsub("%$%d", function()
-								return b:symbol()
-							end)
-
-							::continue::
 						end
 
+						-- Case for numerated args
+						for number_match in text:gmatch("%$%d") do
+							local paramNum = tonumber(number_match:sub(2))
+							local b = identifier_nodes[paramNum]
 
+							if b ~= nil then
+								local hover_info, err = get_hover_info_from_node_sync(b)
+								if err then
+									print("Error: " .. err)
+								else
+									if type(hover_info) == "table" then
+										if hover_info.kind == "markdown" then
+											local m = hover_info.value:match("^.-\n(.-)\n")
+											local _, _, type = m:match("(%s+)([^%s]+)%s+([^%s]+)")
 
-						text = text .. "--over"
+											text = text:gsub("%$%d", function()
+												local arr = false
+												if type:sub(1, 2) == "[]" then
+													type = type:sub(3)
+													arr = true
+												end
+
+												local default_value = golangToPostgresDefaults[type]
+												if default_value then
+													if arr then
+														return "ARRAY[" .. default_value .. "]"
+													else
+														return default_value
+													end
+												else
+													return "MISSING TYPE:" .. type .. "-" .. name
+												end
+											end)
+										else
+											print("Type info isn't md: " .. vim.inspect(hover_info))
+										end
+									else
+										print("Type info isn't md: " .. tostring(hover_info))
+									end
+								end
+
+								text = text:gsub("%$%d", function()
+									return b:symbol()
+								end)
+							end
+						end
 
 						text = text:gsub(";", "")
 						text = text .. ";"
@@ -427,14 +517,14 @@ keeper.extract_code_chunks = function(main_nr, lang, exclude_eval_false, range_s
 		end
 	end
 
-	vim.notify(
-		string.format("Finished code chunks - Buffer: %d", instance),
-		vim.log.levels.INFO,
-		{
-			title = "Counter starting to extract code",
-			timeout = 2000
-		}
-	)
+	-- vim.notify(
+	-- 	string.format("Finished code chunks - Buffer: %d", instance),
+	-- 	vim.log.levels.INFO,
+	-- 	{
+	-- 		title = "Counter starting to extract code",
+	-- 		timeout = 2000
+	-- 	}
+	-- )
 
 	return code_chunks
 end
