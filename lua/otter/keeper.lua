@@ -140,10 +140,10 @@ local golangToPostgresDefaults = {
 	["complex64"] = "0",
 	["complex128"] = "0",
 	-- Text type
-	["string"] = "''",
+	["string"] = "'string_value'",
 	["rune"] = "'0'",
 	["byte"] = "'0'",
-	["uuid.UUID"] = '0d505840-5265-4a43-8b5c-9db7e0e93e2e',
+	["uuid.UUID"] = "'0d505840-5265-4a43-8b5c-9db7e0e93e2e'",
 	-- Boolean type
 	["bool"] = "'false'",
 	-- Composite types
@@ -324,7 +324,7 @@ keeper.extract_code_chunks = function(main_nr, lang, exclude_eval_false, range_s
 						-- 		end) .. "'"
 						-- end)
 
-						local nodes = {}
+						local identifier_nodes = {}
 						local localNode = node:parent()
 						while localNode ~= nil do
 							if localNode:type() == "argument_list" then
@@ -333,7 +333,7 @@ keeper.extract_code_chunks = function(main_nr, lang, exclude_eval_false, range_s
 								for child in localNode:iter_children() do
 									if child:named() and seen_rsl then
 										text = text .. child:symbol() .. "----"
-										table.insert(nodes, child)
+										table.insert(identifier_nodes, child)
 									end
 
 									if child:type() == "raw_string_literal" then
@@ -345,9 +345,10 @@ keeper.extract_code_chunks = function(main_nr, lang, exclude_eval_false, range_s
 							localNode = localNode:parent()
 						end
 
+						-- Case for numerated args
 						for match in text:gmatch("%$%d") do
 							local paramNum = tonumber(match:sub(2))
-							local b = nodes[paramNum]
+							local b = identifier_nodes[paramNum]
 
 							if b == nil then
 								goto continue
